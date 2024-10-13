@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./structs/NFT.sol";
+import "./structs/MintParams.sol";
 import "./errors.sol";
 import "./events.sol";
 
@@ -45,28 +46,26 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
         return tokenId;
     }
 
-    function mintNFT(uint8 _typeNFT) public payable{
-        uint8 tokenId = _mintVerifications(_typeNFT);
-
-        _safeMint(msg.sender, tokenId);
-        
-        emit NFTMinted(_typeNFT, tokenId, msg.sender);
-    }
-
-    function mintNFTTo(address _to, uint8 _typeNFT) public payable {
-        uint8 tokenId = _mintVerifications(_typeNFT);        
-        
-        _safeMint(_to, tokenId);
-        
-        emit NFTMintedTo(_typeNFT, tokenId, msg.sender, _to);
-    }
-
-    function tokenURI(uint256 tokenId) public view override returns (string memory) {
-        uint8 typeNFT = _mapTokenIdNFTType[uint8(tokenId)];
+    function _generateTokenURI(uint8 _tokenId) internal view returns (string memory) {
+        uint8 typeNFT = _mapTokenIdNFTType[_tokenId];
         NFT storage nft = nfts[typeNFT];
-        uint8 tokenNumber = _mapTokenIdPositionInType[uint8(tokenId)];
+        uint8 tokenNumber = _mapTokenIdPositionInType[_tokenId];
 
         return string(abi.encodePacked(nft.baseURI, Strings.toString(tokenNumber), ".json"));
+    }
+
+    function mintNFT(MintParams memory _mintParams) public payable{
+        uint8 tokenId = _mintVerifications(_mintParams.typeNFT);
+        string memory tokenURI = _generateTokenURI(tokenId);
+
+        if (_mintParams.to == address(0)) {
+            _safeMint(msg.sender, tokenId);
+        } else {
+            _safeMint(_mintParams.to, tokenId);            
+        }
+        _setTokenURI(tokenId, tokenURI);
+        
+        emit NFTMinted(_mintParams.typeNFT, tokenId, msg.sender);
     }
 
     function sellNFT(address to, uint8 tokenId) public payable {
