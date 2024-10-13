@@ -9,17 +9,15 @@ import "./errors.sol";
 import "./events.sol";
 
 contract PokemonNFT is ERC721URIStorage, Ownable {
-    mapping (uint => NFT) nfts;
+    mapping (uint16 => NFT) public nfts;
     mapping (uint8 => uint8) private _mapTokenIdNFTType;
     mapping (uint8 => uint8) private _mapTokenIdPositionInType;
-    mapping (uint8 => address) private _mapTokenIdNFTOwner;
 
     address public royaltyRecipient;
     string public contractURI;
     uint256 public royaltyFee;
-    uint8 public nextTokenId;
-    
-    uint8 public constant SUPPLY = 100;
+    uint8 public nextTokenId = 1;
+    uint16 public numberOfNFTs = 0;
 
     constructor(string memory _contractURI, address _royaltyRecipient, uint256 _royaltyFee, string memory _name, string memory _symbol) 
         ERC721(_name, _symbol)
@@ -28,72 +26,67 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
         contractURI = _contractURI;
         royaltyRecipient = _royaltyRecipient;
         royaltyFee = _royaltyFee;
-
-        createNFCs();
     }
 
-    function mintNFTTo(address to, uint8 idxNFT) public payable {
-        NFT storage nft = nfts[idxNFT];
-        uint8 tokenId = nextTokenId++;
+    function _mintVerifications(uint8 _typeNFT) internal returns (uint8) {
+        if (_typeNFT > numberOfNFTs || _typeNFT == 0) revert InexistentNFT(_typeNFT);
+
+        NFT storage nft = nfts[_typeNFT];
         
         if (nft.maxSupply == 0) revert SupplyUnavailable();
-        if (nft.currentSupply >= nft.maxSupply) revert SupplyExceeded(idxNFT);
+        if (nft.currentSupply >= nft.maxSupply) revert SupplyExceeded(nft);
         if (msg.value != nft.mintPrice) revert WrongPaymentValue(nft.mintPrice, msg.value);
         
+        uint8 tokenId = nextTokenId++;
         nft.currentSupply += 1;
-        _safeMint(to, idxNFT);
-        _mapTokenIdNFTType[tokenId] = idxNFT;
+        _mapTokenIdNFTType[tokenId] = _typeNFT;
         _mapTokenIdPositionInType[tokenId] = nft.currentSupply;
-        _mapTokenIdNFTOwner[tokenId] = msg.sender;
-        
-        emit NFTMinted(idxNFT, tokenId, msg.sender);
+
+        return tokenId;
     }
 
-    function mintNFT(uint8 idxNFT) public payable{
-        NFT storage nft = nfts[idxNFT];
-        uint8 tokenId = nextTokenId++;
+    function mintNFT(uint8 _typeNFT) public payable{
+        uint8 tokenId = _mintVerifications(_typeNFT);
+
+        _safeMint(msg.sender, tokenId);
         
-        if (nft.maxSupply == 0) revert SupplyUnavailable();
-        if (nft.currentSupply >= nft.maxSupply) revert SupplyExceeded(idxNFT);
-        if (msg.value != nft.mintPrice) revert WrongPaymentValue(nft.mintPrice, msg.value);
+        emit NFTMinted(_typeNFT, tokenId, msg.sender);
+    }
+
+    function mintNFTTo(address _to, uint8 _typeNFT) public payable {
+        uint8 tokenId = _mintVerifications(_typeNFT);        
         
-        nft.currentSupply += 1;
-        _safeMint(msg.sender, idxNFT);
-        _mapTokenIdNFTType[tokenId] = idxNFT;
-        _mapTokenIdPositionInType[tokenId] = nft.currentSupply;
-        _mapTokenIdNFTOwner[tokenId] = msg.sender;
+        _safeMint(_to, tokenId);
         
-        emit NFTMinted(idxNFT, tokenId, msg.sender);
+        emit NFTMintedTo(_typeNFT, tokenId, msg.sender, _to);
     }
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
-        uint8 idxNFT = _mapTokenIdNFTType[uint8(tokenId)];
-        NFT storage nft = nfts[idxNFT];
+        uint8 typeNFT = _mapTokenIdNFTType[uint8(tokenId)];
+        NFT storage nft = nfts[typeNFT];
         uint8 tokenNumber = _mapTokenIdPositionInType[uint8(tokenId)];
 
         return string(abi.encodePacked(nft.baseURI, Strings.toString(tokenNumber), ".json"));
     }
 
-    function transferNFT(address to, uint8 tokenId) public payable {
+    function sellNFT(address to, uint8 tokenId) public payable {
         uint256 salePrice = msg.value;
-        uint256 royaltyValue = salePrice * (royaltyFee / 100);
+        uint256 royaltyValue = (salePrice * royaltyFee) / 100;
 
-        if (msg.sender != _mapTokenIdNFTOwner[tokenId]) revert IsNotNFTOwner();
+        if (msg.sender != ownerOf(tokenId)) revert IsNotNFTOwner();
 
-        (bool success, ) = payable(owner()).call{value: royaltyValue}("");
+        bool success = payable(royaltyRecipient).send(royaltyValue);
         if (!success) revert FailedToPayRoyalty();
 
-        _transfer(msg.sender, to, tokenId);
-
-        (success, ) = msg.sender.call{value: salePrice - royaltyValue}("");
+        success = payable(msg.sender).send(salePrice - royaltyValue);
         if (!success) revert FailedToPaySale();
 
-        _mapTokenIdNFTOwner[tokenId] = to;
+        _transfer(msg.sender, to, tokenId);
 
         emit NFTTransfered(tokenId, msg.sender, to);
     }
 
-    function setContractURI(string memory _contractURI) public {
+    function updateContractURI(string memory _contractURI) public {
         contractURI = _contractURI;
     }
 
@@ -102,24 +95,28 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
         if (!success) revert TransferFailed();
     }
 
-    function createNFCs() internal {
-        nfts[1] = NFT({
+    function createNFT(uint8 _maxSupply, uint256 _mintPrice, string calldata _baseURI) public onlyOwner {
+        nfts[++numberOfNFTs] = NFT({
             currentSupply: 0,
-            maxSupply: 10,
-            mintPrice: 0.01 ether,
-            baseURI: "https://coral-able-tarantula-122.mypinata.cloud/ipfs/QmWqyciVSoroPvWtT7XvRtVJYzPrgSYTf5eMbtFZYg8VM9/"
+            maxSupply: _maxSupply,
+            mintPrice: _mintPrice,
+            baseURI: _baseURI
         });
-        nfts[2] = NFT({
-            currentSupply: 0,
-            maxSupply: 5,
-            mintPrice: 0.01 ether,
-            baseURI: "https://coral-able-tarantula-122.mypinata.cloud/ipfs/QmWqyciVSoroPvWtT7XvRtVJYzPrgSYTf5eMbtFZYg8VM9/"
+
+        emit NFCCreated(numberOfNFTs, _baseURI);
+    }
+
+    function updateNFT(uint16 _typeNFT, uint8 _maxSupply, uint256 _mintPrice, string calldata _baseURI) public onlyOwner {
+        NFT storage foundNFT = nfts[_typeNFT];
+        if (_maxSupply < foundNFT.currentSupply) revert MaxSupplyLessThanAlreadyMinted(foundNFT.currentSupply, _maxSupply);
+
+        nfts[_typeNFT] = NFT({
+            currentSupply: foundNFT.currentSupply,
+            maxSupply: _maxSupply,
+            mintPrice: _mintPrice,
+            baseURI: _baseURI
         });
-        nfts[3] = NFT({
-            currentSupply: 0,
-            maxSupply: 3,
-            mintPrice: 0.01 ether,
-            baseURI: "https://coral-able-tarantula-122.mypinata.cloud/ipfs/QmWqyciVSoroPvWtT7XvRtVJYzPrgSYTf5eMbtFZYg8VM9/"
-        });
-    }   
+
+        emit NFCUpdated(_typeNFT);
+    }
 }
