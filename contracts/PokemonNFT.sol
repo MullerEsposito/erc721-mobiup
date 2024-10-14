@@ -12,12 +12,12 @@ import "./events.sol";
 
 contract PokemonNFT is ERC721URIStorage, Ownable {
     mapping (uint16 => NFT) public nfts;
-    mapping (uint8 => TokenData) private _mapTokenIdTokenData;
-    mapping (uint8 => uint8) private _mapTokenIdPositionInType;
+    mapping (uint32 => TokenData) private _mapTokenIdTokenData;
+    mapping (uint32 => uint8) private _mapTokenIdPositionInType;
 
     string public contractURI;
     uint256 public royaltyFee;
-    uint8 public nextTokenId = 1;
+    uint32 public nextTokenId = 1;
     uint16 public numberOfNFTs = 0;
 
     constructor(string memory _contractURI, uint256 _royaltyFee, string memory _name, string memory _symbol) 
@@ -30,6 +30,7 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
 
     function createNFT(uint8 _maxSupply, uint256 _mintPrice, string calldata _baseURI) public onlyOwner {
         nfts[++numberOfNFTs] = NFT({
+            typeNFT: numberOfNFTs,
             currentSupply: 0,
             maxSupply: _maxSupply,
             mintPrice: _mintPrice,
@@ -44,6 +45,7 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
         if (_maxSupply < foundNFT.currentSupply) revert MaxSupplyLessThanAlreadyMinted(foundNFT.currentSupply, _maxSupply);
 
         nfts[_typeNFT] = NFT({
+            typeNFT: foundNFT.typeNFT,
             currentSupply: foundNFT.currentSupply,
             maxSupply: _maxSupply,
             mintPrice: _mintPrice,
@@ -54,45 +56,44 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
     }
 
     function mintNFT(MintParams memory _mintParams) public payable{
-        uint8 tokenId = _mintVerifications(_mintParams.typeNFT);
-        string memory tokenURI = _generateTokenURI(tokenId);
+        NFT storage nft = nfts[_mintParams.typeNFT];
+        _mintValidations(nft);
+
+        uint32 tokenId = nextTokenId++;
+        string memory tokenURI = _generateTokenURI(tokenId);        
+
+        _mapTokenIdTokenData[tokenId].nftType = nft.typeNFT;
+        _mapTokenIdPositionInType[tokenId] = ++nft.currentSupply;
 
         if (_mintParams.to == address(0)) {
             _safeMint(msg.sender, tokenId);
             _mapTokenIdTokenData[tokenId].royaltyAddress = msg.sender;
-
+            emit NFTMinted(nft.typeNFT, tokenId, msg.sender, msg.sender);
         } else {
             _safeMint(_mintParams.to, tokenId);
             _mapTokenIdTokenData[tokenId].royaltyAddress = _mintParams.to;
+            emit NFTMinted(nft.typeNFT, tokenId, msg.sender, _mintParams.to);
         }
-        _setTokenURI(tokenId, tokenURI);
-        
-        emit NFTMinted(_mintParams.typeNFT, tokenId, msg.sender);
+        _setTokenURI(tokenId, tokenURI);        
     }
 
-    function _mintVerifications(uint8 _typeNFT) internal returns (uint8) {
-        if (_typeNFT > numberOfNFTs || _typeNFT == 0) revert InexistentNFT(_typeNFT);
-
-        NFT storage nft = nfts[_typeNFT];
-        
-        if (nft.maxSupply == 0) revert SupplyUnavailable();
-        if (nft.currentSupply >= nft.maxSupply) revert SupplyExceeded(nft);
-        if (msg.value != nft.mintPrice) revert WrongPaymentValue(nft.mintPrice, msg.value);
-        
-        uint8 tokenId = nextTokenId++;
-        nft.currentSupply += 1;
-        _mapTokenIdTokenData[tokenId].nftType = _typeNFT;
-        _mapTokenIdPositionInType[tokenId] = nft.currentSupply;
-
-        return tokenId;
+    function _mintValidations(NFT memory _nft) internal {
+        if (_nft.typeNFT > numberOfNFTs || _nft.typeNFT == 0) revert InexistentNFT(_nft.typeNFT);        
+        if (_nft.maxSupply == 0) revert SupplyUnavailable();
+        if (_nft.currentSupply >= _nft.maxSupply) revert SupplyExceeded(_nft);
+        if (msg.value != _nft.mintPrice) revert WrongPaymentValue(_nft.mintPrice, msg.value);
     }
 
-    function _generateTokenURI(uint8 _tokenId) internal view returns (string memory) {
+    function _generateTokenURI(uint32 _tokenId) internal view returns (string memory) {
         TokenData storage tokenData = _mapTokenIdTokenData[_tokenId];
         NFT storage nft = nfts[tokenData.nftType];
         uint8 tokenNumber = _mapTokenIdPositionInType[_tokenId];
 
         return string(abi.encodePacked(nft.baseURI, Strings.toString(tokenNumber), ".json"));
+    }
+
+    function updateTokenURI(uint32 _tokenId, string calldata _newTokenURI) public onlyOwner {
+        _setTokenURI(_tokenId, _newTokenURI);
     }
     
     function sellNFT(address to, uint8 tokenId) public payable {
