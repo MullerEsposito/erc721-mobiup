@@ -2,6 +2,6 @@
 pragma solidity ^0.8.20;
 
 struct TokenData {
-    uint8 nftType;
+    uint16 nftType;
     address royaltyAddress;
 }
