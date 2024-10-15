@@ -29,7 +29,8 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
     }
 
     function createNFT(uint8 _maxSupply, uint256 _mintPrice, string calldata _baseURI) public onlyOwner {
-        nfts[++numberOfNFTs] = NFT({
+        numberOfNFTs++;
+        nfts[numberOfNFTs] = NFT({
             typeNFT: numberOfNFTs,
             currentSupply: 0,
             maxSupply: _maxSupply,
@@ -37,7 +38,7 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
             baseURI: _baseURI
         });
 
-        emit NFCCreated(numberOfNFTs, _baseURI);
+        emit NFTCreated(numberOfNFTs, _baseURI);
     }
 
     function updateNFT(uint16 _typeNFT, uint8 _maxSupply, uint256 _mintPrice, string calldata _baseURI) public onlyOwner {
@@ -52,7 +53,7 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
             baseURI: _baseURI
         });
 
-        emit NFCUpdated(_typeNFT);
+        emit NFTUpdated(_typeNFT);
     }
 
     function mintNFT(MintParams memory _mintParams) public payable{
@@ -60,10 +61,9 @@ contract PokemonNFT is ERC721URIStorage, Ownable {
         _mintValidations(nft);
 
         uint32 tokenId = nextTokenId++;
-        string memory tokenURI = _generateTokenURI(tokenId);        
-
         _mapTokenIdTokenData[tokenId].nftType = nft.typeNFT;
         _mapTokenIdPositionInType[tokenId] = ++nft.currentSupply;
+        string memory tokenURI = _generateTokenURI(tokenId);
 
         if (_mintParams.to == address(0)) {
             _safeMint(msg.sender, tokenId);
